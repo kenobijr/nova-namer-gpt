@@ -162,13 +162,13 @@ class TransformerBlock(nn.Module):
         super().__init__()
         self.multi_head_sa = MultiHeadAttention(config)
         self.ffw = Ffw(config)
-        self.ln1 = nn.LayerNorm(config.n_embd)  # pre-attention norm
-        self.ln2 = nn.LayerNorm(config.n_embd)  # pre-ffn norm
+        self.rmsn1 = nn.RMSNorm(config.n_embd)  # pre-attention norm
+        self.rmsn2 = nn.RMSNorm(config.n_embd)  # pre-ffn norm
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # pre-norm architecture: norm -> sublayer -> residual
-        x = x + self.multi_head_sa((self.ln1(x)))  # attention with residual
-        x = x + self.ffw(self.ln2(x))  # feed-forward with residual
+        x = x + self.multi_head_sa((self.rmsn1(x)))  # attention with residual
+        x = x + self.ffw(self.rmsn2(x))  # feed-forward with residual
         return x
 
 
@@ -199,7 +199,7 @@ class GPT(nn.Module):
                 h=nn.ModuleList(
                     [TransformerBlock(config) for _ in range(config.n_layer)]
                 ),
-                ln_f=nn.LayerNorm(config.n_embd),  # final layer norm
+                rmsn_f=nn.RMSNorm(config.n_embd),  # final layer norm
             )
         )
         # language modeling head
@@ -231,7 +231,7 @@ class GPT(nn.Module):
         # forward through transformer blocks
         for block in self.transformer.h:
             x = block(x)
-        x = self.transformer.ln_f(x)
+        x = self.transformer.rmsn_f(x)
         # compute logits and loss
         if targets is not None:
             # training mode - compute loss over all positions
