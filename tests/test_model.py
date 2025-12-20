@@ -119,10 +119,12 @@ def test_positional_encoding_device_placement(model_cfg):
 
 
 def test_ffw_widening_factor(model_cfg):
+    """ widen n_emb * 4; reduce by 2/3; go to first smaller value divisible by 16 """
     ffw = Ffw(model_cfg)
-    assert ffw.c_fc.out_features == model_cfg.n_embd * model_cfg.ffw_widen
-    assert ffw.proj.in_features == model_cfg.n_embd * model_cfg.ffw_widen
-    assert ffw.proj.out_features == model_cfg.n_embd
+    assert ffw.up_proj.out_features == 16
+    assert ffw.down_proj.in_features == 16
+    assert ffw.down_proj.out_features == model_cfg.n_embd
+    assert ffw.gate_proj.out_features == 16
 
 
 def test_gradient_flow(model_cfg, min_idx_tensor, min_targets_tensor):

@@ -43,7 +43,7 @@ class GPTconfig:
     ffw_widen: int = 4  # expansion factor for ffn hidden layer
     # bias settings for different components
     a_bias: bool = True  # attention projection bias
-    ffw_bias: bool = True  # feed-forward layer bias
+    ffw_bias: bool = False  # feed-forward layer bias -> none with SwiGLU
     lm_head_bias: bool = False  # language modeling head bias
 
 
@@ -127,26 +127,26 @@ class MultiHeadAttention(nn.Module):
 
 class Ffw(nn.Module):
     """
-    feed-forward network with relu activation
-    - expands to wider hidden dimension then projects back
+    feed-forward network with SwiGLU
+    - inner_dim expanded by widen factor & scaled down by 2/3
+    - ensured inner_dim is divisible by 16
     - includes dropout for regularization
     - uses explicit layer naming for weight initialization
     """
 
     def __init__(self, config: GPTconfig):
         super().__init__()
-        hidden_dim = config.n_embd * config.ffw_widen  # expand by widening factor
-        self.c_fc = nn.Linear(config.n_embd, hidden_dim, bias=config.ffw_bias)  # expand
-        self.relu = nn.ReLU()
-        self.proj = nn.Linear(
-            hidden_dim, config.n_embd, bias=config.ffw_bias
-        )  # project back
+        raw_dim = int(config.n_embd * config.ffw_widen * (2/3))
+        inner_dim = raw_dim - (raw_dim % 16)  # ensure divisible by 16
+        self.gate_proj = nn.Linear(config.n_embd, inner_dim, bias=config.ffw_bias)
+        self.up_proj = nn.Linear(config.n_embd, inner_dim, bias=config.ffw_bias)
+        self.silu = nn.SiLU()
+        self.down_proj = nn.Linear(inner_dim, config.n_embd, bias=config.ffw_bias)
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.c_fc(x)
-        x = self.relu(x)
-        x = self.proj(x)
+        x = self.silu(self.gate_proj(x)) * self.up_proj(x)
+        x = self.down_proj(x)
         return self.dropout(x)
 
 
@@ -178,7 +178,7 @@ class GPT(nn.Module):
     - token and position embeddings
     - stack of transformer blocks
     - language modeling head with weight tying
-    - proper weight initialization following gpt-2 standards
+    - weight initialization following gpt-2 standards
     """
 
     def __init__(self, config: GPTconfig, init_weights: bool = True):
@@ -259,9 +259,8 @@ class GPT(nn.Module):
                 torch.nn.init.zeros_(module.bias)
         # scaled init for residual projections
         for name, param in self.named_parameters():
-            if name.endswith(
-                "proj.weight"
-            ):  # catches both attention and ffw projections
+            # apply scaling ONLY to the final projection layers that output to the residual stream:
+            if name.endswith("multi_head_sa.proj.weight") or name.endswith("ffw.down_proj.weight"):
                 # scale by depth for proper gradient flow
                 torch.nn.init.normal_(
                     param, mean=0.0, std=0.02 / math.sqrt(2 * self.config.n_layer)
