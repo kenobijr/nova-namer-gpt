@@ -10,7 +10,6 @@ Classes:
     NameGPTTrainer: Complete training orchestration with evaluation and model saving
 """
 
-
 import os
 from datetime import datetime
 import torch
@@ -44,7 +43,9 @@ class NameGPTTrainer:
         self.train_data, self.dev_data = self._load_data()
         # init model and optimizer
         self.model = GPT(self.model_config).to(self.device)
-        self.optimizer = Optim.Adam(self.model.parameters(), lr=self.train_config.learning_rate)
+        self.optimizer = Optim.Adam(
+            self.model.parameters(), lr=self.train_config.learning_rate
+        )
         # training state tracking
         self.training_results = []  # loss logs during training
         self.final_losses = {}  # final evaluation results
@@ -52,7 +53,7 @@ class NameGPTTrainer:
         print(f"Successful model init with {self.model.get_num_params():,} parameters.")
 
     def _get_device(self) -> str:
-        """ select best available device based on config and hardware """
+        """select best available device based on config and hardware"""
         if self.train_config.device == "cuda" and torch.cuda.is_available():
             return "cuda"
         elif self.train_config.device == "mps" and torch.backends.mps.is_available():
@@ -71,20 +72,33 @@ class NameGPTTrainer:
         splits = {}
         # load binary files using memory mapping
         for split in ["train", "dev"]:
-            assert os.path.exists(os.path.join(data_dir, f"{split}.bin")), ".bin file not found."
-            data = np.memmap(os.path.join(data_dir, f"{split}.bin"), dtype=np.uint16, mode="r")
+            assert os.path.exists(os.path.join(data_dir, f"{split}.bin")), (
+                ".bin file not found."
+            )
+            data = np.memmap(
+                os.path.join(data_dir, f"{split}.bin"), dtype=np.uint16, mode="r"
+            )
             splits[split] = torch.from_numpy(data.astype(np.int64))
         # load metadata and validate vocabulary
-        assert os.path.exists(os.path.join(data_dir, "vocab_meta.pkl")), "meta.pkl file not found"
+        assert os.path.exists(os.path.join(data_dir, "vocab_meta.pkl")), (
+            "meta.pkl file not found"
+        )
         with open(os.path.join(data_dir, "vocab_meta.pkl"), "rb") as f:
             meta = pickle.load(f)
         actual_vocab = meta["vocab_size"]
         # update model config vocab size // warn if necessary at mismatch and proceed anyway
-        if self.model_config.vocab_size and self.model_config.vocab_size != actual_vocab:
-            print(f"Warning: Model config vocab_size ({self.model_config.vocab_size}) "
-                  f"doesn't match data vocab_size ({actual_vocab}). Using data vocab_size.")
+        if (
+            self.model_config.vocab_size
+            and self.model_config.vocab_size != actual_vocab
+        ):
+            print(
+                f"Warning: Model config vocab_size ({self.model_config.vocab_size}) "
+                f"doesn't match data vocab_size ({actual_vocab}). Using data vocab_size."
+            )
         self.model_config.vocab_size = actual_vocab
-        print(f"Loaded data: train={len(splits["train"]):,} tok, dev={len(splits["dev"]):,} tok")
+        print(
+            f"Loaded data: train={len(splits['train']):,} tok, dev={len(splits['dev']):,} tok"
+        )
         print(f"Vocabulary size: {meta['vocab_size']}")
         return splits["train"], splits["dev"]
 
@@ -98,12 +112,17 @@ class NameGPTTrainer:
         batch_borders = torch.randint(
             0,
             len(split) - self.model_config.context_len,
-            (self.train_config.batch_size,),
+            (self.train_config.mini_batch_size,),
         )
         # extract input sequences (x) and target sequences (y)
-        x = torch.stack([split[t: t + self.model_config.context_len] for t in batch_borders])
+        x = torch.stack(
+            [split[t : t + self.model_config.context_len] for t in batch_borders]
+        )
         y = torch.stack(
-            [split[t + 1: t + self.model_config.context_len + 1] for t in batch_borders]
+            [
+                split[t + 1 : t + self.model_config.context_len + 1]
+                for t in batch_borders
+            ]
         )
         return x, y
 
@@ -114,31 +133,34 @@ class NameGPTTrainer:
         - handles model saving and experiment tracking
         - generates samples after training completion
         """
+        grad_accum = self.train_config.batch_size // (
+            self.train_config.mini_batch_size * self.model_config.context_len
+        )
         start_time = datetime.now()
         # set random seed for reproducibility
         torch.manual_seed(self.train_config.seed)
         print("Training started...")
         # main training loop
         for i in range(self.train_config.train_iter):
-
             # periodic evaluation and logging
             if i % self.train_config.eval_interval == 0:
                 losses = self._estimate_loss()
                 result = (
-                    f"loss after {i} iterations: train_loss {losses["train"]:.5f}; "
-                    f"eval_loss {losses["dev"]:.5f}"
+                    f"loss after {i} iterations: train_loss {losses['train']:.5f}; "
+                    f"eval_loss {losses['dev']:.5f}"
                 )
                 self.training_results.append(result)
                 print(result)
 
-            # forward pass
-            Xtr, Ytr = self._get_batch(self.train_data)
-            Xtr, Ytr = Xtr.to(self.device), Ytr.to(self.device)
-            _, loss = self.model(Xtr, Ytr)
-
-            # backward pass
             self.optimizer.zero_grad()
-            loss.backward()
+            for grad_i in range(grad_accum):
+                # forward pass
+                Xtr, Ytr = self._get_batch(self.train_data)
+                Xtr, Ytr = Xtr.to(self.device), Ytr.to(self.device)
+                _, loss = self.model(Xtr, Ytr)
+                loss = loss / grad_accum
+                # backward pass
+                loss.backward()
 
             # update params
             self.optimizer.step()
@@ -155,7 +177,10 @@ class NameGPTTrainer:
         """
         self.model.eval()
         losses = {}
-        for split_name, split_data in [("train", self.train_data), ("dev", self.dev_data)]:
+        for split_name, split_data in [
+            ("train", self.train_data),
+            ("dev", self.dev_data),
+        ]:
             split_losses = torch.zeros(self.train_config.eval_iter)
             # average over multiple batches for stable estimates
             for i in range(self.train_config.eval_iter):
@@ -185,7 +210,9 @@ class NameGPTTrainer:
         # demonstrate model capabilities
         self._sample_after_train()
 
-    def _save_checkpoint(self, train_loss: float, dev_loss: float, training_time: float) -> str:
+    def _save_checkpoint(
+        self, train_loss: float, dev_loss: float, training_time: float
+    ) -> str:
         """
         save model state and comprehensive experiment metadata
         - saves model state dict for inference
@@ -234,7 +261,7 @@ class NameGPTTrainer:
         sampler = NameGPTSampler.from_training(
             sample_config=SampleConfig(
                 device=self.train_config.device,
-                num_samples=self.train_config.num_samples
+                num_samples=self.train_config.num_samples,
             ),
             model_dir=self.model_save_dir,
             model=self.model,

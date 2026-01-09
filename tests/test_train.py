@@ -68,7 +68,7 @@ def test_get_batch(train_cfg, model_cfg):
     t = NameGPTTrainer(train_cfg, model_cfg)
     for data in (t.train_data, t.dev_data):
         x, y = t._get_batch(data)
-        B, C = train_cfg.batch_size, model_cfg.context_len
+        B, C = train_cfg.mini_batch_size, model_cfg.context_len
         assert x.shape == (B, C) and y.shape == (B, C)
         # y should equal x shifted left by one (for the first C-1 tokens)
         #    i.e.  x[:,1:] == y[:,:-1]

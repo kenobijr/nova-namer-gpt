@@ -32,6 +32,7 @@ class TrainConfig:
 
     # training hyperparameters
     batch_size: int = 64
+    mini_batch_size: int = 4
     learning_rate: float = 3e-4  # standard gpt learning rate
     train_iter: int = 5500
     eval_iter: int = 150  # batches for loss estimation
@@ -71,7 +72,9 @@ class SampleConfig:
     # generation parameters
     num_samples: int = 50
     max_length: int = 50  # maximum characters per sample
-    temperature: float = 1  # sampling temperature (higher = more creative) -> 1 = normal
+    temperature: float = (
+        1  # sampling temperature (higher = more creative) -> 1 = normal
+    )
 
     # quality control
     enforce_novelty: bool = True  # discard exact training data matches
