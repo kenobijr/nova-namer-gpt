@@ -128,7 +128,7 @@ class MultiHeadAttention(nn.Module):
 class Ffw(nn.Module):
     """
     feed-forward network with SwiGLU
-    - inner_dim expanded by widen factor & scaled down by 2/3
+    - inner_dim expanded by widen factor & scaled down by 2/3 Swiglu ratio
     - ensured inner_dim is divisible by 16
     - includes dropout for regularization
     - uses explicit layer naming for weight initialization
